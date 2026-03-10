@@ -1,0 +1,238 @@
+### Universal ###
+# Common files that should be ignored in all projects
+
+# Logs
+*.log
+# Temporary files
+*.tmp
+*~
+
+*.bak
+# Environment files (containing secrets, API keys, credentials)
+.env
+*.env
+.env.*
+
+# Local configuration that shouldn't be shared
+*.local
+
+### Svelte ###
+# svelte specific files
+
+node_modules/
+build/
+.cache/
+*.log
+
+### Go ###
+# go specific files
+
+*.exe
+*.test
+vendor/
+*.out
+go.work
+
+go.sum
+
+### Aws ###
+# AWS credentials and configuration files
+
+# AWS Credentials and Config
+.aws/
+aws.config
+credentials
+*.pem
+
+*.ppk
+*.cer
+*.p12
+*.pfx
+aws-credentials.json
+
+.aws-sam/
+samconfig.toml
+# AWS CLI
+.aws/credentials
+.aws/config
+
+.aws/cli/cache/
+aws-config.json
+aws-credentials.ini
+# AWS CDK
+cdk.out/
+
+cdk.context.json
+cdk-outputs.json
+.cdk.staging/
+*.cdk.json
+# AWS SAM
+
+.aws-sam/
+samconfig.toml
+.sam/
+template.yaml
+template.yml
+
+# AWS Amplify
+amplify/
+.amplifyrc
+amplify.json
+team-provider-info.json
+
+aws-exports.js
+# AWS CloudFormation
+*.template
+*.template.json
+*.stack.json
+
+cloudformation.json
+cloudformation.yaml
+cloudformation.yml
+# AWS Elastic Beanstalk
+.elasticbeanstalk/
+
+*.cfg.yml
+.ebextensions/
+.ebignore
+# AWS Lambda
+lambda.zip
+
+function.zip
+*.lambda-package.zip
+# AWS Secrets
+*.aws-secrets.json
+secrets.json
+
+aws-keys.json
+# AWS Logs
+aws-logs/
+cloudwatch/
+*.log
+
+# AWS Local Development
+.localstack/
+localstack/
+docker-compose.localstack.yml
+# AWS DynamoDB Local
+
+.dynamodb/
+# AWS SSO
+.sso/
+.aws/sso/cache/
+# AWS AppSync
+
+.appsync/
+# AWS CodeBuild
+buildspec.yml
+# AWS CodePipeline
+pipeline.yml
+
+# AWS ECS
+ecs-params.yml
+# AWS Systems Manager
+.ssm/
+# AWS WorkSpaces
+
+.workspaces/
+
+### Node ###
+# Node.js dependency directory, logs, and environment files
+
+# Dependencies
+node_modules/
+jspm_packages/
+bower_components/
+web_modules/
+
+# Logs
+logs
+*.log
+*.launch
+connect.lock/
+
+libpeerconnection.log
+.history/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+lerna-debug.log*
+.pnpm-debug.log*
+# Diagnostic reports
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+# Runtime data
+
+pids
+*.pid
+*.seed
+*.pid.lock
+# Environment
+
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+# Package management
+
+.npm
+package-lock.json
+yarn.lock
+.yarn-integrity
+.yarn/cache
+
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+# Coverage & Test
+
+coverage/
+lib-cov
+*.lcov
+.nyc_output
+# Build output
+
+dist/
+build/
+.next/
+out/
+.nuxt
+
+.output
+# Cache & Temporary
+.cache/
+.temp/
+.grunt
+
+.lock-wscript
+.fusebox/
+.dynamodb/
+.tern-port
+.vscode-test
+
+.node_repl_history
+.webpack/
+# TypeScript
+*.tsbuildinfo
+# Optional REPL history
+
+.node_repl_history
+# Additional caches
+.eslintcache
+.stylelintcache
+.parcel-cache
+
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+# Misc
+
+*.tgz
+.serverless/
+.vuepress/dist
+.temp
+.docusaurus
+
+.svelte-kit
