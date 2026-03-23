@@ -4,7 +4,7 @@
 
 <div class="h-screen w-full overflow-hidden">
 	<ChatWidget
-		apiBaseUrl="https://api.example.com/v1/chat"
+		apiBaseUrl="http://localhost:8080"
 		tenantId="demo-workspace-001"
 		title="AI Assistant"
 		placeholder="Ask me anything..."

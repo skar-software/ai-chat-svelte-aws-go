@@ -4,7 +4,7 @@
   let { children } = $props();
 </script>
 
-<ModeWatcher />
+<ModeWatcher defaultMode="system" />
 
 <svelte:head>
   <link rel="preconnect" href="https://fonts.googleapis.com" />

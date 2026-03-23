@@ -12,6 +12,8 @@
         ConfirmationRequest,
         ConfirmationActions,
         ConfirmationAction,
+        ConfirmationAccepted,
+        ConfirmationRejected,
     } from "$lib/components/ai-elements/confirmation";
     import {
         Plan,
@@ -34,20 +36,40 @@
         QueueSectionContent,
     } from "$lib/components/ai-elements/queue";
     import { Actions, Action } from "$lib/components/ai-elements/action";
+    import {
+        InlineCitation,
+        InlineCitationText,
+        InlineCitationCard,
+        InlineCitationCardTrigger,
+        InlineCitationCardBody,
+        InlineCitationCarousel,
+        InlineCitationCarouselHeader,
+        InlineCitationCarouselIndex,
+        InlineCitationCarouselPrev,
+        InlineCitationCarouselNext,
+        InlineCitationCarouselContent,
+        InlineCitationCarouselItem,
+        InlineCitationSource,
+        InlineCitationQuote,
+    } from "$lib/components/ai-elements/inline-citation";
     import { 
         Code2, 
         CircleAlert, 
         Copy, 
-        RefreshCcw
+        RefreshCcw,
+        CheckCircle,
+        XCircle,
     } from "@lucide/svelte";
-    import type { ChatMessage } from "./types";
+    import type { ChatMessage, DemoPart } from "./types";
 
     interface ChatMessageItemProps {
         msg: ChatMessage;
         shikiTheme?: string;
+        onUpdatePart?: (msgId: string, partIndex: number, updatedPart: DemoPart) => void;
+        onRetry?: (assistantMsgId: string) => void;
     }
 
-    let { msg, shikiTheme = "github-dark-default" }: ChatMessageItemProps =
+    let { msg, shikiTheme = "github-dark-default", onUpdatePart, onRetry }: ChatMessageItemProps =
         $props();
 
     const handleCopy = async (text?: string) => {
@@ -61,7 +83,7 @@
     };
 
     const handleRetry = () => {
-        console.log("Retry message:", msg.id);
+        onRetry?.(msg.id);
     };
 </script>
 
@@ -78,7 +100,7 @@
 
             {#if msg.parts && msg.parts.length > 0}
                 {#each msg.parts as part}
-                {#if part.type === "code" && part.content}
+                {#if part.type === "code" && part.content !== undefined}
                     <div class="my-3">
                         <Code.Root
                             code={part.content}
@@ -129,7 +151,9 @@
                         </Artifact.Root>
                     </div>
                 {:else if part.type === "confirmation"}
+                    {@const partIdx = msg.parts?.indexOf(part) ?? -1}
                     <div class="my-3">
+                      {#key part.meta?.state}
                         <Confirmation
                             state={part.meta?.state ?? "approval-requested"}
                             approval={part.meta?.approval}
@@ -149,12 +173,50 @@
                                 </p>
                             </ConfirmationRequest>
                             <ConfirmationActions>
-                                <ConfirmationAction variant="outline"
-                                    >Deny</ConfirmationAction
-                                >
-                                <ConfirmationAction>Approve</ConfirmationAction>
+                                <ConfirmationAction
+                                    variant="outline"
+                                    onclick={() => {
+                                        if (partIdx >= 0 && onUpdatePart) {
+                                            onUpdatePart(msg.id, partIdx, {
+                                                ...part,
+                                                meta: {
+                                                    ...part.meta,
+                                                    state: "approval-responded",
+                                                    approval: { id: part.meta?.approval?.id ?? "1", approved: false, reason: "Denied by user" },
+                                                },
+                                            });
+                                        }
+                                    }}
+                                >Deny</ConfirmationAction>
+                                <ConfirmationAction
+                                    onclick={() => {
+                                        if (partIdx >= 0 && onUpdatePart) {
+                                            onUpdatePart(msg.id, partIdx, {
+                                                ...part,
+                                                meta: {
+                                                    ...part.meta,
+                                                    state: "approval-responded",
+                                                    approval: { id: part.meta?.approval?.id ?? "1", approved: true },
+                                                },
+                                            });
+                                        }
+                                    }}
+                                >Approve</ConfirmationAction>
                             </ConfirmationActions>
+                            <ConfirmationAccepted>
+                                <div class="flex items-center gap-2 text-sm text-green-600 dark:text-green-400 mt-1">
+                                    <CheckCircle class="size-4" />
+                                    <span>Approved</span>
+                                </div>
+                            </ConfirmationAccepted>
+                            <ConfirmationRejected>
+                                <div class="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 mt-1">
+                                    <XCircle class="size-4" />
+                                    <span>Denied{part.meta?.approval?.reason ? `: ${part.meta.approval.reason}` : ""}</span>
+                                </div>
+                            </ConfirmationRejected>
                         </Confirmation>
+                      {/key}
                     </div>
                 {:else if part.type === "plan"}
                     <div class="my-3 w-full">
@@ -207,17 +269,17 @@
                             {/if}
 
                             <!-- Pending Todos Section -->
-                            {#if part.meta.todos && part.meta.todos.filter((t) => t.status === "pending").length > 0}
+                            {#if part.meta.todos && part.meta.todos.filter((t: any) => t.status === "pending").length > 0}
                                 <QueueSection>
                                     <QueueSectionTrigger>
                                         <QueueSectionLabel
                                             label="Pending"
-                                            count={part.meta.todos.filter((t) => t.status === "pending").length}
+                                            count={part.meta.todos.filter((t: any) => t.status === "pending").length}
                                         />
                                     </QueueSectionTrigger>
                                     <QueueSectionContent>
                                         <QueueList>
-                                            {#each part.meta.todos.filter((t) => t.status === "pending") as todo (todo.id)}
+                                            {#each part.meta.todos.filter((t: any) => t.status === "pending") as todo (todo.id)}
                                                 <QueueItem>
                                                     <div class="flex items-center gap-2">
                                                         <QueueItemIndicator completed={false} />
@@ -234,17 +296,17 @@
                             {/if}
 
                             <!-- Completed Todos Section -->
-                            {#if part.meta.todos && part.meta.todos.filter((t) => t.status === "completed").length > 0}
+                            {#if part.meta.todos && part.meta.todos.filter((t: any) => t.status === "completed").length > 0}
                                 <QueueSection>
                                     <QueueSectionTrigger>
                                         <QueueSectionLabel
                                             label="Completed"
-                                            count={part.meta.todos.filter((t) => t.status === "completed").length}
+                                            count={part.meta.todos.filter((t: any) => t.status === "completed").length}
                                         />
                                     </QueueSectionTrigger>
                                     <QueueSectionContent>
                                         <QueueList>
-                                            {#each part.meta.todos.filter((t) => t.status === "completed") as todo (todo.id)}
+                                            {#each part.meta.todos.filter((t: any) => t.status === "completed") as todo (todo.id)}
                                                 <QueueItem>
                                                     <div class="flex items-center gap-2">
                                                         <QueueItemIndicator completed={true} />
@@ -260,6 +322,45 @@
                                 </QueueSection>
                             {/if}
                         </Queue>
+                    </div>
+                {:else if part.type === "citation" && part.meta?.sources}
+                    <div class="my-3">
+                        <InlineCitation>
+                            <InlineCitationText>
+                                <Response content={part.content ?? ""} theme={shikiTheme} />
+                            </InlineCitationText>
+                            <InlineCitationCard>
+                                <InlineCitationCardTrigger
+                                    sources={part.meta.sources.map((s: any) => s.url ?? "")}
+                                />
+                                <InlineCitationCardBody>
+                                    <InlineCitationCarousel>
+                                        <InlineCitationCarouselHeader>
+                                            <InlineCitationCarouselIndex />
+                                            <div class="flex gap-1">
+                                                <InlineCitationCarouselPrev />
+                                                <InlineCitationCarouselNext />
+                                            </div>
+                                        </InlineCitationCarouselHeader>
+                                        <InlineCitationCarouselContent>
+                                            {#each part.meta.sources as source (source.url)}
+                                                <InlineCitationCarouselItem>
+                                                    <InlineCitationSource
+                                                        title={source.title}
+                                                        url={source.url}
+                                                        description={source.description}
+                                                    >
+                                                        {#if source.quote}
+                                                            <InlineCitationQuote>{source.quote}</InlineCitationQuote>
+                                                        {/if}
+                                                    </InlineCitationSource>
+                                                </InlineCitationCarouselItem>
+                                            {/each}
+                                        </InlineCitationCarouselContent>
+                                    </InlineCitationCarousel>
+                                </InlineCitationCardBody>
+                            </InlineCitationCard>
+                        </InlineCitation>
                     </div>
                 {/if}
             {/each}

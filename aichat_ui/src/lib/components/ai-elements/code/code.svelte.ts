@@ -1,7 +1,7 @@
 import { Context } from "runed";
 import type { ReadableBoxedValues, WritableBoxedValues } from "svelte-toolbelt";
 import type { CodeRootProps } from "./types";
-import { highlighter } from "./shiki";
+import { highlighter, supportedLanguageIds } from "./shiki";
 import createDOMPurify from "dompurify";
 import type { HighlighterCore } from "shiki";
 
@@ -44,8 +44,46 @@ class CodeRootState {
 	}
 
 	highlight(code: string) {
+		// Shiki initializes asynchronously; while it's loading, render a simple
+		// non-highlighted fallback so code appears immediately (no "blank" gap).
+		if (!this.highlighter) {
+			const escapeHtml = (s: string) =>
+				s
+					.replaceAll("&", "&amp;")
+					.replaceAll("<", "&lt;")
+					.replaceAll(">", "&gt;")
+					.replaceAll('"', "&quot;")
+					.replaceAll("'", "&#039;");
+
+			const lines = code.split(/\r?\n/);
+			const shownLines = this.opts.hideLines.current ? [code] : lines;
+			const preClasses = `shiki ${this.opts.hideLines.current ? "" : "line-numbers"}`.trim();
+
+			// CSS is already set up for `pre.line-numbers .line::before`, so
+			// we emulate Shiki's basic structure enough for line numbering.
+			const inner = this.opts.hideLines.current
+				? escapeHtml(code)
+				: shownLines
+						.map((l) => `<span class="line">${escapeHtml(l)}</span>`)
+						.join("");
+
+			return `<pre class="${preClasses}"><code>${inner}</code></pre>`;
+		}
+
+		// Shiki expects specific language ids; normalize common aliases and
+		// fall back to "text" so we never render empty code blocks.
+		const rawLang = this.opts.lang.current;
+		const lower = String(rawLang ?? "").trim().toLowerCase();
+
+		let mappedLang = lower;
+		if (lower === "c++" || lower === "cpp" || lower === "cxx") mappedLang = "cpp";
+		else if (lower === "c") mappedLang = "c";
+
+		const supported = new Set(supportedLanguageIds as unknown as string[]);
+		const finalLang = supported.has(mappedLang) ? mappedLang : "text";
+
 		return this.highlighter?.codeToHtml(code, {
-			lang: this.opts.lang.current,
+			lang: finalLang,
 			themes: {
 				light: "github-light-default",
 				dark: "github-dark-default",

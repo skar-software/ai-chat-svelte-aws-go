@@ -236,3 +236,5 @@ out/
 .docusaurus
 
 .svelte-kit
+
+.DS_store

@@ -3,11 +3,24 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Plus, MessageSquare } from "@lucide/svelte";
 
-  interface Props {
-    currentChatTitle?: string;
+  interface SidebarConversation {
+    id: string;
+    title: string;
   }
 
-  let { currentChatTitle = "New conversation" }: Props = $props();
+  interface Props {
+    conversations: SidebarConversation[];
+    activeConversationId?: string;
+    onSelectConversation?: (id: string) => void;
+    onNewChat?: () => void;
+  }
+
+  let {
+    conversations,
+    activeConversationId,
+    onSelectConversation,
+    onNewChat,
+  }: Props = $props();
 </script>
 
 <Sidebar.Root>
@@ -25,6 +38,7 @@
     <Button
       variant="outline"
       class="w-full justify-start gap-2 text-xs h-9 hover:border-primary/50 transition-colors"
+      onclick={onNewChat}
     >
       <Plus class="size-3.5" />
       <span>New chat</span>
@@ -38,12 +52,17 @@
       >
       <Sidebar.GroupContent>
         <Sidebar.Menu>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton isActive={true}>
-              <MessageSquare class="size-4" />
-              <span class="truncate text-xs">{currentChatTitle}</span>
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
+          {#each conversations as conv (conv.id)}
+            <Sidebar.MenuItem>
+              <Sidebar.MenuButton
+                isActive={conv.id === activeConversationId}
+                onclick={() => onSelectConversation?.(conv.id)}
+              >
+                <MessageSquare class="size-4" />
+                <span class="truncate text-xs">{conv.title}</span>
+              </Sidebar.MenuButton>
+            </Sidebar.MenuItem>
+          {/each}
         </Sidebar.Menu>
       </Sidebar.GroupContent>
     </Sidebar.Group>
