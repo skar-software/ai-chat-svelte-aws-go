@@ -1,6 +1,6 @@
 # AI Chat Widget
 
-A monorepo for a reusable AI chat widget with a Go Fiber streaming API and a Svelte 5 UI.
+A monorepo for a reusable AI chat widget with a Go Fiber streaming API and a Svelte 5 UI (Vercel AI).
 
 ## Demo video
 
