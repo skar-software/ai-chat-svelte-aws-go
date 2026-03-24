@@ -2,7 +2,8 @@ package openai
 
 import (
 	"context"
-	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"aichat_go/internal/chat"
@@ -17,105 +18,16 @@ type Provider struct {
 	defaultModel shared.ChatModel
 }
 
-type responseMode string
+type structuredIntent string
 
 const (
-	modeDefault      responseMode = "default"
-	modeUIIntegration responseMode = "ui_integration"
-	modeArtifact     responseMode = "artifact"
-	modePlan         responseMode = "plan"
-	modeConfirmation responseMode = "confirmation"
-	modeQueue        responseMode = "queue"
-	modeCitation     responseMode = "citation"
+	intentNone         structuredIntent = ""
+	intentPlan         structuredIntent = "plan"
+	intentArtifact     structuredIntent = "artifact"
+	intentConfirmation structuredIntent = "confirmation"
+	intentQueue        structuredIntent = "queue"
+	intentCitation     structuredIntent = "citation"
 )
-
-const uiElementsSystemInstruction = "You are generating a real-time UI integration test response for a chat widget.\n\n" +
-	"Output sequence requirements:\n" +
-	"1) Start with one short plain-text sentence.\n" +
-	"2) Include one fenced code block with a language (prefer javascript).\n" +
-	"3) Include exactly one artifact block using ```json:part ... ```.\n" +
-	"4) Include exactly one confirmation block using ```json:part ... ```.\n" +
-	"5) Include exactly one plan block using ```json:part ... ```.\n" +
-	"6) Include exactly one queue block using ```json:part ... ```.\n\n" +
-	"Use these JSON shapes:\n" +
-	"- artifact: {\"type\":\"artifact\",\"content\":\"<markdown>\",\"meta\":{\"title\":\"...\",\"description\":\"...\"}}\n" +
-	"- confirmation: {\"type\":\"confirmation\",\"meta\":{\"title\":\"...\",\"description\":\"...\",\"state\":\"approval-requested\",\"approval\":{\"id\":\"approval-1\"}}}\n" +
-	"- plan: {\"type\":\"plan\",\"meta\":{\"title\":\"...\",\"description\":\"...\",\"steps\":[\"...\",\"...\",\"...\"]}}\n" +
-	"- queue: {\"type\":\"queue\",\"meta\":{\"messages\":[{\"id\":\"m1\",\"text\":\"...\"}],\"todos\":[{\"id\":\"t1\",\"title\":\"...\",\"description\":\"...\",\"status\":\"pending\"},{\"id\":\"t2\",\"title\":\"...\",\"status\":\"completed\"}]}}\n\n" +
-	"Rules:\n" +
-	"- Keep json:part blocks valid JSON\n" +
-	"- Do not wrap json:part JSON in any extra markdown other than the required fences\n" +
-	"- Do not omit any of the required sections"
-
-const artifactSystemInstruction = "When the user asks for a document-style output (checklist, plan, SOP, proposal, report, roadmap, spec, runbook, playbook, template), respond as ONE structured block and nothing else.\n\n" +
-	"Return exactly:\n" +
-	"```json:part\n" +
-	"{\n" +
-	"  \"type\": \"artifact\",\n" +
-	"  \"content\": \"<markdown body>\",\n" +
-	"  \"meta\": {\n" +
-	"    \"title\": \"<short title>\",\n" +
-	"    \"description\": \"<one-line summary>\"\n" +
-	"  }\n" +
-	"}\n" +
-	"```\n\n" +
-	"Rules:\n" +
-	"- No prose before or after the block\n" +
-	"- Valid JSON only\n" +
-	"- Keep \"content\" as markdown text"
-
-const planSystemInstruction = "When the user asks for a step-by-step plan, return exactly ONE json:part block and nothing else.\n\n" +
-	"Use:\n" +
-	"```json:part\n" +
-	"{\n" +
-	"  \"type\": \"plan\",\n" +
-	"  \"meta\": {\n" +
-	"    \"title\": \"<short title>\",\n" +
-	"    \"description\": \"<one-line summary>\",\n" +
-	"    \"steps\": [\"<step 1>\", \"<step 2>\", \"<step 3>\"]\n" +
-	"  }\n" +
-	"}\n" +
-	"```\n\n" +
-	"Rules:\n" +
-	"- No prose before/after block\n" +
-	"- Valid JSON only\n" +
-	"- 3 to 7 concise steps"
-
-const confirmationSystemInstruction = "When the user asks for approval/confirmation style output, return exactly ONE json:part block and nothing else.\n\n" +
-	"Use:\n" +
-	"```json:part\n" +
-	"{\n" +
-	"  \"type\": \"confirmation\",\n" +
-	"  \"meta\": {\n" +
-	"    \"title\": \"<action title>\",\n" +
-	"    \"description\": \"<what needs approval>\",\n" +
-	"    \"state\": \"approval-requested\",\n" +
-	"    \"approval\": { \"id\": \"approval-1\" }\n" +
-	"  }\n" +
-	"}\n" +
-	"```\n\n" +
-	"Rules:\n" +
-	"- No prose before/after block\n" +
-	"- Valid JSON only"
-
-const queueSystemInstruction = "When the user asks for tasks/progress tracking, return exactly ONE json:part block and nothing else.\n\n" +
-	"Use:\n" +
-	"```json:part\n" +
-	"{\n" +
-	"  \"type\": \"queue\",\n" +
-	"  \"meta\": {\n" +
-	"    \"messages\": [{\"id\":\"m1\",\"text\":\"<status message>\"}],\n" +
-	"    \"todos\": [\n" +
-	"      {\"id\":\"t1\",\"title\":\"<pending task>\",\"description\":\"<optional>\",\"status\":\"pending\"},\n" +
-	"      {\"id\":\"t2\",\"title\":\"<completed task>\",\"status\":\"completed\"}\n" +
-	"    ]\n" +
-	"  }\n" +
-	"}\n" +
-	"```\n\n" +
-	"Rules:\n" +
-	"- No prose before/after block\n" +
-	"- Valid JSON only\n" +
-	"- At least 2 todos"
 
 func NewProvider(apiKey, defaultModel string) *Provider {
 	model := shared.ChatModel(defaultModel)
@@ -131,17 +43,7 @@ func NewProvider(apiKey, defaultModel string) *Provider {
 func (p *Provider) Stream(ctx context.Context, input *chat.StreamInput, history []chat.MessageRecord, out chan<- chat.StreamEvent) {
 	defer close(out)
 
-	mode := detectResponseMode(input.Input)
-
-	// Deterministic component output for core structured modes.
-	// Emit the part event directly so it bypasses the text parser entirely.
-	if mode == modeArtifact || mode == modePlan || mode == modeConfirmation || mode == modeQueue || mode == modeCitation {
-		partEvent := buildStructuredPartEvent(mode, input.Input)
-		out <- chat.StreamEvent{Event: "part", Data: partEvent}
-		out <- chat.StreamEvent{Event: "usage", Data: map[string]int{"input_tokens": 1, "output_tokens": 1}}
-		out <- chat.StreamEvent{Event: "_stream_done", Data: map[string]string{"content": ""}}
-		return
-	}
+	intent := inferIntentFromPrompt(input.Input)
 
 	model := p.defaultModel
 	if input.Model != "" {
@@ -149,9 +51,6 @@ func (p *Provider) Stream(ctx context.Context, input *chat.StreamInput, history 
 	}
 
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(history)+1)
-	if sys := systemInstructionForPrompt(input.Input); sys != "" {
-		messages = append(messages, openai.SystemMessage(sys))
-	}
 	for _, h := range history {
 		if h.Role == "assistant" {
 			messages = append(messages, openai.AssistantMessage(h.Content))
@@ -180,7 +79,10 @@ func (p *Provider) Stream(ctx context.Context, input *chat.StreamInput, history 
 			delta := chunk.Choices[0].Delta.Content
 			if delta != "" {
 				fullContent += delta
-				out <- chat.StreamEvent{Event: "message.delta", Data: map[string]string{"delta": delta}}
+				// For structured intents, buffer and emit a typed part at the end.
+				if intent == intentNone {
+					out <- chat.StreamEvent{Event: "message.delta", Data: map[string]string{"delta": delta}}
+				}
 			}
 		}
 		if chunk.JSON.Usage.Valid() {
@@ -201,312 +103,201 @@ func (p *Provider) Stream(ctx context.Context, input *chat.StreamInput, history 
 		inputTokens = 100
 	}
 
+	if intent != intentNone {
+		if part, ok := buildStructuredPart(intent, input.Input, fullContent); ok {
+			out <- chat.StreamEvent{Event: "part", Data: part}
+			fullContent = ""
+		} else if fullContent != "" {
+			// Fallback to plain text if we couldn't construct a valid structured part.
+			out <- chat.StreamEvent{Event: "message.delta", Data: map[string]string{"delta": fullContent}}
+		}
+	}
+
 	out <- chat.StreamEvent{Event: "usage", Data: map[string]int{"input_tokens": inputTokens, "output_tokens": outputTokens}}
 	out <- chat.StreamEvent{Event: "_stream_done", Data: map[string]string{"content": fullContent}}
 }
 
-func buildStructuredPartEvent(mode responseMode, prompt string) chat.PartEvent {
-	cleanPrompt := strings.TrimSpace(prompt)
-	if cleanPrompt == "" {
-		cleanPrompt = "Requested by user"
+func inferIntentFromPrompt(prompt string) structuredIntent {
+	p := strings.ToLower(strings.TrimSpace(prompt))
+	if p == "" {
+		return intentNone
 	}
 
-	switch mode {
-	case modeArtifact:
-		return chat.PartEvent{
-			Type: "artifact",
-			Content: fmt.Sprintf("## Artifact\n\n%s\n\n- [ ] Review\n- [ ] Approve\n- [ ] Execute",
-				cleanPrompt),
-			Meta: map[string]interface{}{
-				"title":       "Artifact",
-				"description": "Generated from your request",
-			},
+	if containsAny(p, "citation", "citations", "source", "sources", "reference", "references", "resource", "resources") {
+		return intentCitation
+	}
+	if containsAny(p, "task list", "todo", "to-do", "queue", "track", "tracking", "pending", "completed") {
+		return intentQueue
+	}
+	if containsAny(p, "approval", "approve", "confirm", "are you sure") {
+		return intentConfirmation
+	}
+	if containsAny(p, "runbook", "checklist", "sop", "playbook", "spec", "proposal", "report", "template", "artifact") {
+		return intentArtifact
+	}
+	if containsAny(p, "plan", "roadmap", "step-by-step", "step by step", "migration plan", "rollout plan") {
+		return intentPlan
+	}
+
+	return intentNone
+}
+
+func containsAny(s string, hints ...string) bool {
+	for _, h := range hints {
+		if strings.Contains(s, h) {
+			return true
 		}
-	case modePlan:
+	}
+	return false
+}
+
+func buildStructuredPart(intent structuredIntent, prompt, content string) (chat.PartEvent, bool) {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return chat.PartEvent{}, false
+	}
+
+	switch intent {
+	case intentPlan:
+		steps := extractListItems(trimmed, 8)
+		if len(steps) < 3 {
+			return chat.PartEvent{}, false
+		}
 		return chat.PartEvent{
 			Type: "plan",
 			Meta: map[string]interface{}{
 				"title":       "Execution Plan",
-				"description": "Step-by-step plan generated from your request",
-				"steps": []string{
-					"Clarify requirements and acceptance criteria",
-					"Implement the requested changes",
-					"Validate with tests and review",
-				},
+				"description": "Auto-selected by prompt intent",
+				"steps":       steps,
 			},
+		}, true
+	case intentQueue:
+		items := extractListItems(trimmed, 12)
+		if len(items) < 2 {
+			return chat.PartEvent{}, false
 		}
-	case modeConfirmation:
-		return chat.PartEvent{
-			Type: "confirmation",
-			Meta: map[string]interface{}{
-				"title":       "Approval Required",
-				"description": cleanPrompt,
-				"state":       "approval-requested",
-				"approval": map[string]interface{}{
-					"id": "approval-1",
-				},
-			},
-		}
-	case modeQueue:
-		tasks := extractQueueTasks(cleanPrompt)
-		todos := make([]map[string]interface{}, 0, len(tasks))
-		for i, t := range tasks {
-			status := "pending"
-			if i == len(tasks)-1 && len(tasks) > 1 {
-				status = "completed"
-			}
+		todos := make([]map[string]interface{}, 0, len(items))
+		for i, it := range items {
 			todos = append(todos, map[string]interface{}{
-				"id":          fmt.Sprintf("t%d", i+1),
-				"title":       t,
-				"description": "Generated task",
-				"status":      status,
+				"id":          "t" + strconv.Itoa(i+1),
+				"title":       it,
+				"description": "",
+				"status":      "pending",
 			})
 		}
 		return chat.PartEvent{
 			Type: "queue",
 			Meta: map[string]interface{}{
 				"messages": []map[string]interface{}{
-					{"id": "m1", "text": "Queue generated from your request"},
+					{"id": "m1", "text": "Task list generated from your request"},
 				},
 				"todos": todos,
 			},
+		}, true
+	case intentConfirmation:
+		desc := trimmed
+		if len(desc) > 240 {
+			desc = desc[:240]
 		}
-	case modeCitation:
+		return chat.PartEvent{
+			Type: "confirmation",
+			Meta: map[string]interface{}{
+				"title":       "Action Required",
+				"description": desc,
+				"state":       "approval-requested",
+				"approval":    map[string]interface{}{"id": "approval-1"},
+			},
+		}, true
+	case intentArtifact:
+		return chat.PartEvent{
+			Type:    "artifact",
+			Content: trimmed,
+			Meta: map[string]interface{}{
+				"title":       inferArtifactTitle(trimmed),
+				"description": "Auto-selected by prompt intent",
+			},
+		}, true
+	case intentCitation:
+		sources := extractSources(trimmed, 8)
+		if len(sources) == 0 {
+			return chat.PartEvent{}, false
+		}
 		return chat.PartEvent{
 			Type:    "citation",
-			Content: cleanPrompt,
+			Content: trimmed,
 			Meta: map[string]interface{}{
-				"sources": []map[string]interface{}{
-					{
-						"title":       "Svelte Documentation",
-						"url":         "https://svelte.dev/docs",
-						"description": "Official Svelte framework documentation covering components, reactivity, and SvelteKit.",
-						"quote":       "Svelte is a radical new approach to building user interfaces.",
-					},
-					{
-						"title":       "MDN Web Docs",
-						"url":         "https://developer.mozilla.org",
-						"description": "Comprehensive web development documentation by Mozilla.",
-						"quote":       "Resources for developers, by developers.",
-					},
-					{
-						"title":       "Wikipedia",
-						"url":         "https://en.wikipedia.org",
-						"description": "The free encyclopedia that anyone can edit.",
-					},
-				},
+				"sources": sources,
 			},
-		}
+		}, true
 	default:
-		return chat.PartEvent{}
+		return chat.PartEvent{}, false
 	}
 }
 
-func extractQueueTasks(prompt string) []string {
-	p := strings.ToLower(prompt)
-	out := []string{}
-
-	if strings.Contains(p, "setup") {
-		out = append(out, "Setup")
-	}
-	if strings.Contains(p, "test") {
-		out = append(out, "Test")
-	}
-	if strings.Contains(p, "deploy") {
-		out = append(out, "Deploy")
-	}
-
-	if len(out) == 0 {
-		out = []string{"Task 1", "Task 2", "Task 3"}
+func extractListItems(text string, max int) []string {
+	re := regexp.MustCompile(`(?m)^\s*(?:\d+[\).\s-]+|[-*]\s+)(.+)$`)
+	matches := re.FindAllStringSubmatch(text, -1)
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		item := strings.TrimSpace(m[1])
+		if item == "" {
+			continue
+		}
+		out = append(out, item)
+		if len(out) >= max {
+			break
+		}
 	}
 	return out
 }
 
-func systemInstructionForPrompt(prompt string) string {
-	switch detectResponseMode(prompt) {
-	case modeUIIntegration:
-		return uiElementsSystemInstruction
-	case modeConfirmation:
-		return confirmationSystemInstruction
-	case modeQueue:
-		return queueSystemInstruction
-	case modePlan:
-		return planSystemInstruction
-	case modeArtifact:
-		return artifactSystemInstruction
-	default:
-		return ""
+func inferArtifactTitle(text string) string {
+	re := regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
+	if m := re.FindStringSubmatch(text); len(m) > 1 {
+		return strings.TrimSpace(m[1])
 	}
+	line := strings.TrimSpace(strings.SplitN(text, "\n", 2)[0])
+	if line == "" {
+		return "Artifact"
+	}
+	if len(line) > 80 {
+		return line[:80]
+	}
+	return line
 }
 
-func detectResponseMode(prompt string) responseMode {
-	if shouldRunUIElementsTest(prompt) {
-		return modeUIIntegration
-	}
-	if shouldPreferConfirmation(prompt) {
-		return modeConfirmation
-	}
-	if shouldPreferQueue(prompt) {
-		return modeQueue
-	}
-	if shouldPreferPlan(prompt) {
-		return modePlan
-	}
-	if shouldPreferCitation(prompt) {
-		return modeCitation
-	}
-	if shouldPreferArtifact(prompt) {
-		return modeArtifact
-	}
-	return modeDefault
-}
+func extractSources(text string, max int) []map[string]string {
+	seen := map[string]bool{}
+	out := make([]map[string]string, 0, max)
 
-func shouldPreferArtifact(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-
-	artifactHints := []string{
-		"artifact",
-		"checklist",
-		"plan",
-		"roadmap",
-		"sop",
-		"runbook",
-		"playbook",
-		"spec",
-		"proposal",
-		"report",
-		"document",
-		"template",
-		"requirements doc",
-		"release notes",
-		"deployment guide",
-	}
-
-	for _, h := range artifactHints {
-		if strings.Contains(p, h) {
-			return true
+	mdLinkRe := regexp.MustCompile(`\[([^\]]+)\]\((https?://[^\s)]+)\)`)
+	for _, m := range mdLinkRe.FindAllStringSubmatch(text, -1) {
+		url := strings.TrimSpace(m[2])
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		title := strings.TrimSpace(m[1])
+		if title == "" {
+			title = "Source"
+		}
+		out = append(out, map[string]string{"title": title, "url": url})
+		if len(out) >= max {
+			return out
 		}
 	}
-	return false
-}
 
-func shouldPreferPlan(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	planHints := []string{
-		"step by step plan",
-		"plan for",
-		"execution plan",
-		"implementation plan",
-		"rollout plan",
-		"migration plan",
-		"project plan",
-	}
-	for _, h := range planHints {
-		if strings.Contains(p, h) {
-			return true
+	urlRe := regexp.MustCompile(`https?://[^\s)]+`)
+	for _, u := range urlRe.FindAllString(text, -1) {
+		url := strings.TrimSpace(u)
+		if url == "" || seen[url] {
+			continue
+		}
+		seen[url] = true
+		out = append(out, map[string]string{"title": "Source", "url": url})
+		if len(out) >= max {
+			return out
 		}
 	}
-	return false
-}
-
-func shouldPreferConfirmation(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	confirmationHints := []string{
-		"ask for approval",
-		"needs approval",
-		"approval required",
-		"confirm before",
-		"confirmation",
-		"are you sure",
-	}
-	for _, h := range confirmationHints {
-		if strings.Contains(p, h) {
-			return true
-		}
-	}
-	return false
-}
-
-func shouldPreferQueue(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	queueHints := []string{
-		"task list",
-		"task tracking",
-		"tracking template",
-		"todo",
-		"to-do",
-		"queue",
-		"progress tracker",
-		"track tasks",
-		"track the tasks",
-		"pending and completed",
-	}
-	for _, h := range queueHints {
-		if strings.Contains(p, h) {
-			return true
-		}
-	}
-	return false
-}
-
-func shouldPreferCitation(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	citationHints := []string{
-		"cite",
-		"citation",
-		"source",
-		"sources",
-		"reference",
-		"references",
-		"according to",
-		"research",
-		"study",
-		"studies",
-		"paper",
-		"journal",
-		"with citations",
-		"with sources",
-		"with references",
-	}
-	for _, h := range citationHints {
-		if strings.Contains(p, h) {
-			return true
-		}
-	}
-	return false
-}
-
-func shouldRunUIElementsTest(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	uiHints := []string{
-		"test ui elements",
-		"ui test",
-		"test all ui components",
-		"artifact confirmation plan queue",
-		"full ui checklist",
-	}
-	for _, h := range uiHints {
-		if strings.Contains(p, h) {
-			return true
-		}
-	}
-	return false
+	return out
 }

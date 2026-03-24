@@ -303,6 +303,230 @@
     });
   }
 
+  function inferArtifactTitle(text: string): string {
+    const heading = text.match(/^#{1,3}\s+(.+)$/m)?.[1]?.trim();
+    if (heading) return heading.slice(0, 80);
+    const firstLine = text.trim().split("\n")[0]?.trim() ?? "";
+    if (!firstLine) return "Artifact";
+    return firstLine.slice(0, 80);
+  }
+
+  function inferPlanFromText(text: string): DemoPart | null {
+    const trimmed = text.trim();
+
+    const stepMatches = [...trimmed.matchAll(/^\s*(?:\d+[\).\s-]+|[-*]\s+)(.+)$/gm)];
+    const steps = stepMatches
+      .map((m) => m[1]?.trim())
+      .filter((s): s is string => !!s && s.length > 0)
+      .slice(0, 8);
+
+    if (steps.length < 3) return null;
+
+    return {
+      type: "plan",
+      meta: {
+        title: "Execution Plan",
+        description: "Auto-selected by response format",
+        steps,
+      },
+    };
+  }
+
+  function shouldPromoteToArtifact(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (trimmed.length < 280) return false;
+    if (trimmed.includes("```json:part")) return false;
+
+    const lower = trimmed.toLowerCase();
+    const structuralSignals = [
+      /^#{1,3}\s+/m.test(trimmed),
+      /^\d+\.\s+/m.test(trimmed),
+      /^-\s+\[[ xX]\]/m.test(trimmed),
+      /^[-*]\s+/m.test(trimmed),
+    ].filter(Boolean).length;
+
+    const planLikeTerms = ["plan", "step-by-step", "step by step", "migration", "rollout"];
+    if (planLikeTerms.some((keyword) => lower.includes(keyword))) return false;
+
+    const intentSignals = [
+      "runbook",
+      "checklist",
+      "playbook",
+      "sop",
+      "deployment",
+      "release plan",
+      "migration plan",
+      "proposal",
+      "spec",
+      "roadmap",
+      "report",
+      "template",
+    ].filter((keyword) => lower.includes(keyword)).length;
+
+    // Promote long, structured, document-like answers to artifact cards.
+    return structuralSignals >= 2 || (structuralSignals >= 1 && intentSignals >= 1);
+  }
+
+  function extractCitationSources(text: string): Array<{ title: string; url: string; description?: string }> {
+    const sources = new Map<string, { title: string; url: string; description?: string }>();
+    const markdownLinks = [...text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g)];
+    for (const m of markdownLinks) {
+      const title = (m[1] ?? "").trim();
+      const url = (m[2] ?? "").trim();
+      if (!url) continue;
+      sources.set(url, { title: title || "Source", url });
+    }
+    return [...sources.values()].slice(0, 8);
+  }
+
+  function inferIntentFromPrompt(prompt: string): "plan" | "artifact" | "confirmation" | "queue" | "citation" | null {
+    const p = prompt.toLowerCase();
+    if (
+      p.includes("citation") ||
+      p.includes("citations") ||
+      p.includes("source") ||
+      p.includes("sources") ||
+      p.includes("reference") ||
+      p.includes("references") ||
+      p.includes("resource") ||
+      p.includes("resources")
+    ) {
+      return "citation";
+    }
+    if (
+      p.includes("task list") ||
+      p.includes("todo") ||
+      p.includes("to-do") ||
+      p.includes("queue") ||
+      p.includes("track") ||
+      p.includes("tracking") ||
+      p.includes("pending") ||
+      p.includes("completed")
+    ) {
+      return "queue";
+    }
+    if (
+      p.includes("approval") ||
+      p.includes("approve") ||
+      p.includes("confirm") ||
+      p.includes("are you sure")
+    ) {
+      return "confirmation";
+    }
+    if (
+      p.includes("runbook") ||
+      p.includes("checklist") ||
+      p.includes("sop") ||
+      p.includes("playbook") ||
+      p.includes("spec") ||
+      p.includes("proposal") ||
+      p.includes("report") ||
+      p.includes("template") ||
+      p.includes("artifact")
+    ) {
+      return "artifact";
+    }
+    if (
+      p.includes("plan") ||
+      p.includes("roadmap") ||
+      p.includes("step-by-step") ||
+      p.includes("step by step") ||
+      p.includes("migration plan") ||
+      p.includes("rollout plan")
+    ) {
+      return "plan";
+    }
+    return null;
+  }
+
+  function promoteAssistantMessageToStructuredPart(msgId: string, userPrompt: string) {
+    updateMessageById(msgId, (msg) => {
+      if (msg.role !== "assistant") return msg;
+      if (msg.parts?.some((p) => p.type === "artifact" || p.type === "plan" || p.type === "confirmation" || p.type === "queue" || p.type === "citation")) return msg;
+
+      const intent = inferIntentFromPrompt(userPrompt);
+      let selectedPart: DemoPart | null = null;
+
+      if (intent === "citation") {
+        const sources = extractCitationSources(msg.content);
+        if (sources.length > 0) {
+          selectedPart = {
+            type: "citation",
+            content: msg.content.trim(),
+            meta: { sources },
+          };
+        } else {
+          // Keep plain text if we can't extract references.
+          selectedPart = null;
+        }
+      } else if (intent === "queue") {
+        const taskMatches = [...msg.content.matchAll(/^\s*(?:\d+[\).\s-]+|[-*]\s+)(.+)$/gm)];
+        const todos = taskMatches
+          .map((m, idx) => ({
+            id: `t${idx + 1}`,
+            title: (m[1] ?? "").trim(),
+            description: "",
+            status: "pending",
+          }))
+          .filter((t) => t.title.length > 0)
+          .slice(0, 12);
+
+        if (todos.length > 0) {
+          selectedPart = {
+            type: "queue",
+            meta: {
+              messages: [{ id: "m1", text: "Task list auto-generated from response" }],
+              todos,
+            },
+          };
+        }
+      } else if (intent === "confirmation") {
+        selectedPart = {
+          type: "confirmation",
+          meta: {
+            title: "Action Required",
+            description: msg.content.trim().slice(0, 240),
+            state: "approval-requested",
+            approval: { id: crypto.randomUUID() },
+          },
+        };
+      } else if (intent === "plan") {
+        selectedPart = inferPlanFromText(msg.content);
+      } else if (intent === "artifact") {
+        selectedPart = {
+          type: "artifact",
+          content: msg.content.trim(),
+          meta: {
+            title: inferArtifactTitle(msg.content),
+            description: "Auto-selected by prompt intent",
+          },
+        };
+      } else {
+        const planPart = inferPlanFromText(msg.content);
+        const artifactPart: DemoPart | null = shouldPromoteToArtifact(msg.content)
+          ? {
+              type: "artifact",
+              content: msg.content.trim(),
+              meta: {
+                title: inferArtifactTitle(msg.content),
+                description: "Auto-selected by response format",
+              },
+            }
+          : null;
+        selectedPart = planPart ?? artifactPart;
+      }
+
+      if (!selectedPart) return msg;
+
+      return {
+        ...msg,
+        content: "",
+        parts: [...(msg.parts ?? []), selectedPart],
+      };
+    });
+  }
+
   async function processMessage(text: string, queueItemId?: string) {
     if (status !== "idle" && !queueItemId) return;
 
@@ -387,6 +611,7 @@
                 ...conv,
                 backendConversationId: convId,
               }));
+              promoteAssistantMessageToStructuredPart(assistantId, text.trim());
               finishProcessing();
             },
             onError(errMessage) {
