@@ -8,7 +8,7 @@ const DEFAULT_HEADERS = {
 	Accept: 'text/event-stream',
 };
 
-// --- Request / Response types (match backend contract) ---
+
 
 export interface StreamChatRequest {
 	input: string;
@@ -68,8 +68,6 @@ export interface StreamCallbacks {
 	onError?: (message: string) => void;
 }
 
-// --- Helpers ---
-
 function ensureBaseUrl(url: string): string {
 	const u = url.replace(/\/+$/, '');
 	return u.includes('/v1') ? u : `${u}/v1`;
@@ -79,9 +77,6 @@ function authHeaders(authToken?: string): Record<string, string> {
 	if (!authToken?.trim()) return {};
 	return { Authorization: `Bearer ${authToken.trim()}` };
 }
-
-// --- API ---
-
 export interface ChatApiConfig {
 	apiBaseUrl: string;
 	authToken?: string;
@@ -89,9 +84,6 @@ export interface ChatApiConfig {
 	workspaceId?: string;
 }
 
-/**
- * Stream chat: POST /v1/responses:stream, parse SSE and invoke callbacks.
- */
 export async function streamChat(
 	config: ChatApiConfig,
 	request: StreamChatRequest,
@@ -104,7 +96,6 @@ export async function streamChat(
 		...(request.conversation_id && { conversation_id: request.conversation_id }),
 		...(request.model && { model: request.model }),
 	};
-	// Backend may derive tenant/workspace from auth; include if provided for validation
 	if (config.tenantId) body.tenant_id = config.tenantId;
 	if (config.workspaceId) body.workspace_id = config.workspaceId;
 	if (request.tenant_id) body.tenant_id = request.tenant_id;
